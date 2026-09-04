@@ -1,7 +1,7 @@
 {
   "name": "handoff",
   "description": "Hand off a conversation to the next session: writes a self-contained handoff document, prints a copy-paste handoff message, and maintains a central queue of pending handoffs with a clickable index.",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "author": {
     "name": "Yi-Ru Chen"
   }

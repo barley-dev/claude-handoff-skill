@@ -370,7 +370,19 @@ If `<PENDING_DIR>/_format.md` exists, **read it and follow it** — it is the au
 - The message must be **verbatim identical** to what Step 5 printed — copying from the file and copying from the conversation must yield the same text
 - **Append, never overwrite.** The pending file is an accumulating file and must never be rewritten wholesale
 - If one handoff produces several documents (interleaved projects), append **one entry per document**
-- After appending, state the resolved path in one line (e.g. `交接語已寫入 ~/資料/_harness/handoffs/pending.md`). Do not dump the file contents
+- **After appending, verify the write and report the verification — not the intent.** Run a `grep` for the new entry's title in the pending file and paste the result. Only then state that it was written. Do not dump the file contents.
+
+  ```bash
+  LC_ALL=C grep -c "^## <the exact title you just appended>" "$PENDING_FILE"
+  ```
+
+  Expected output is `1`. If it is `0`, the append silently failed — say so explicitly and tell the user to save the message manually. If it is `2` or more, you appended a duplicate — stop and resolve it before continuing.
+
+  > **Why the command and not just the sentence** (established 2026-09-04, at the user's request): "交接語已寫入 …" written on its own is a *self-declaration* — the same class of evidence this skill's completion gate rejects. The user reported that after each handoff he was opening `pending.md` himself to check whether the entry was actually there, because the sentence alone gave him no reason to trust it. A `grep` returning `1` is a fact that would come back `0` if the write had failed; the sentence would look identical either way.
+  >
+  > **Do not print the confirmation because it is required.** Print it because you ran the check and it passed. If you did not run the check, do not claim the entry is registered.
+
+- **In the final status summary of your reply, include the queue registration as a verified item**, alongside the other completion evidence — e.g. `交接語已登載 pending.md（grep 命中 1）｜索引 33 則（--audit 通過）`. The user reads that summary to decide whether the handoff is finished; a handoff whose message never reached the queue is not finished, and that must be visible there rather than only in the tool output above.
 - If the write fails (missing path that cannot be created, permission error), **say so explicitly** and tell the user to save the message manually — never fail silently
 
 ### Retirement check (after appending, same turn)
@@ -410,7 +422,12 @@ The tool scans every entry in the pending file and rewrites a clickable index be
 - **Order matters** — run it only after both the append and the retirement cut, or the index will miss the new entry or retain a retired one
 - The tool is **idempotent**: re-running replaces only the index block, never appends or touches anything else. Safe to re-run at any point
 - The index block is tool-maintained. **Neither humans nor AI may hand-edit it** — manual changes are overwritten on the next run
-- Paste the tool's output line (e.g. `索引已更新：...（32 則）`) into your reply as completion evidence (per the completion gate in Step 4)
+- Paste the tool's output line (e.g. `索引已更新：...（33 則）`) into your reply as completion evidence (per the completion gate in Step 4)
+- **Then run `--audit` and paste that output too.** `--check` only confirms the index matches a freshly computed one — the tool compared against itself, which cannot reveal that the generator is wrong. `--audit` asserts the output is *correct*: every entry indexed, none duplicated within a section, no back-link inside a handoff message's fence. Its `N 則被索引` figure is also the second half of the Step 5.5 proof — it says the new entry is not merely present in the file but actually reached the index the user navigates by.
+
+  ```bash
+  python3 "${CLAUDE_PLUGIN_ROOT}/tools/pending_index.py" --audit
+  ```
 - **Reconcile the entry count against what you actually did — not against "+1".** Step 5.5 can both append and retire in the same turn, so compute the expected count as `before + appended − retired`. Appending one while retiring one nets **zero change**, and that is correct, not a fault. Only stop and investigate when the count disagrees with that arithmetic.
   > Established 2026-09-04, from a live acceptance test: an append-plus-retirement turn left the count at 33→33 with a perfectly correct index (0 broken links, 0 missing). A naive "+1" expectation flags that healthy case as a failure — and, worse, would mask the real fault it was meant to catch.
   - The tool identifies an entry by its `### 交接語` block, not by the title format, so a title that deviates is still counted; a section with no `### 交接語` block is silently skipped. If the count is short, look for a missing or misspelled `### 交接語` heading first

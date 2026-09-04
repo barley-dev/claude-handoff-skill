@@ -209,6 +209,7 @@ def extract_entries(text, topics=None):
         entries.append({
             "title": title,
             "date": date,
+            "doc": _cell(body, "交接文件") or "",
             "status": status,
             "deadline": _cell(body, "期限"),
             "workspace": workspace,
@@ -243,8 +244,50 @@ def build_index(entries):
     lines.append(f"共 {len(entries)} 則：可動手 {len(active)}、卡住 {len(blocked)}。點標題跳到該則。")
     lines.append("")
 
+    def _doc_link(e):
+        """交接文件的 Obsidian 連結。
+
+        老師的實際動線是「在索引看到一則 → 想知道它在講什麼 → 要開交接文件」，
+        原本得先跳到該則、再從表格裡把路徑複製出來。這裡直接給一個可點的
+        `[文件]`，省掉中間兩步。
+        `| 交接文件 |` 欄的值形如 `` `~/資料/.../Handoff_X.md` ``，
+        取檔名（去掉 .md）當 wikilink 目標——vault 內檔名唯一，Obsidian 解得到。
+        """
+        cell = e.get("doc", "").strip()
+        if not cell or cell in ("無", "-"):
+            return ""
+        # 取第一個反引號包住的路徑。該欄位可能含多個路徑與括號註解，例如
+        # `| 交接文件 | `A.md`（銜接 `B.md`） |`——直接 strip 反引號會把整串
+        # 連註解一起當成檔名，產出 `[[B.md`）|文件]]` 這種壞連結（2026-09-04 實測）。
+        m = re.search(r"`([^`]+)`", cell)
+        raw = m.group(1) if m else cell
+        name = raw.rsplit("/", 1)[-1].strip()
+        if name.endswith(".md"):
+            name = name[:-3]
+        if not name:
+            return ""
+        # 只在檔案真的存在時才給連結。實測 2026-09-04：33 則裡有 9 則的
+        # `| 交接文件 |` 指向已不存在的路徑（檔案被搬動或更名，欄位沒跟著改）。
+        # 若照樣輸出，索引會多出 9 個點了打不開的死連結——那比沒有連結更糟，
+        # 使用者會以為是 Obsidian 壞了。找不到就靜靜省略，並在檔尾統一提示。
+        base = Path(raw.replace("~", str(Path.home()))) if raw.startswith("~") else None
+        if base is None or not base.is_file():
+            return ""
+        return f" · [[{name}|文件]]"
+
+    def _created(e):
+        """建立日期，供索引顯示時間序。
+
+        2026-09-03 把 `[日期時間]` 從標題移進 `| 建立 |` 欄，標題變乾淨，
+        但索引也因此看不出時間先後。老師 2026-09-04 回報仍需要這個資訊——
+        要的是「檢視待辦時掌握時間序上的相關性」，不是要它回到標題。
+        只顯示日期不顯示時分：時分對判斷先後幾乎沒有貢獻，卻佔掉寬度。
+        """
+        d = (e.get("date") or "").strip()
+        return d.split()[0] if d else ""
+
     def link(e):
-        return f"[[#{e['title']}]]"
+        return f"[[#{e['title']}]]{_doc_link(e)}"
 
     # ── 1. 現在該做什麼 ──
     if dated:
@@ -254,6 +297,8 @@ def build_index(entries):
             note = f" — 期限 {e['deadline']}"
             if unblocks:
                 note += f"；做完會解鎖 {len(unblocks)} 則"
+            if _created(e):
+                note += f"（建立 {_created(e)}）"
             lines.append(f"- {link(e)}{note}")
         lines.append("")
 
@@ -282,6 +327,8 @@ def build_index(entries):
                 marks.append(f"期限 {e['deadline']}")
             if e["blocked"]:
                 marks.append("卡住")
+            if _created(e):
+                marks.append(f"建立 {_created(e)}")
             suffix = f" — {'；'.join(marks)}" if marks else ""
             lines.append(f"- {link(e)}{suffix}")
         lines.append("")
@@ -291,7 +338,10 @@ def build_index(entries):
         lines.append(f"**其他**（{len(others)}）")
         lines.append("")
         for e in others:
-            suffix = " — 卡住" if e["blocked"] else ""
+            marks = (["卡住"] if e["blocked"] else [])
+            if _created(e):
+                marks.append(f"建立 {_created(e)}")
+            suffix = f" — {'；'.join(marks)}" if marks else ""
             lines.append(f"- {link(e)}{suffix}")
         lines.append("")
 
