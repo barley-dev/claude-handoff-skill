@@ -16,6 +16,7 @@ If `WORKSPACE_ROOT` is not declared, the skill infers it from conversation conte
 |----------|---------|---------|
 | `HANDOFF_DIR` | Where handoff documents are saved | `<WORKSPACE_ROOT>/_handoffs/` |
 | `TEMPLATE_PATH` | Path to a user-provided handoff template | none (skill generates full content) |
+| `PENDING_FILE` | Central queue of handoff messages awaiting pickup (Step 5.5/5.6) | `<WORKSPACE_ROOT>/_harness/handoffs/pending.md` |
 | `ACTION_TRACKER` | Path to a cross-workspace action-list file for opt-in sync | none (sync step skipped) |
 | `CENTRAL_HANDOFF_INDEX` | Path to a central handoff index that tracks handoffs across workspaces | none (cross-workspace indexing skipped) |
 | `TRIGGER_PHRASES` | Additional trigger phrases in any language | English defaults only |
@@ -29,6 +30,7 @@ Users add a section to their `CLAUDE.md`. Fill in values appropriate for your ow
 
 - WORKSPACE_ROOT: <your-workspace-path>
 - HANDOFF_DIR: <WORKSPACE_ROOT>/_handoffs/
+- PENDING_FILE: <WORKSPACE_ROOT>/_harness/handoffs/pending.md
 - TEMPLATE_PATH: <your-template-path>    # optional
 - ACTION_TRACKER: <your-tracker-path>    # optional
 - TRIGGER_PHRASES: [handoff, wrap up, session end]
@@ -53,3 +55,10 @@ If the conversation spans multiple workspaces, the user may declare a list:
 ```
 
 In that case, each workspace gets its own handoff document under its own `HANDOFF_DIR`, plus a one-line cross-index (see `optional-sections.md`).
+
+## Note on `PENDING_FILE`
+
+Unlike `HANDOFF_DIR`, this path is **not** resolved per-workspace at write time. It is one shared queue across every workspace the user works in, so that "what is waiting for me" has a single answer. Its parent directory also holds:
+
+- `archive/YYYY-MM.md` — entries that have left the queue, each tagged `completed` / `superseded` / `dropped`
+- `_format.md` — optional; when present it is the authoritative entry format and overrides the template in `SKILL.md`

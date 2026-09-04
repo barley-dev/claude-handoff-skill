@@ -55,7 +55,7 @@ Ask one at a time, waiting for each answer:
 2. **Handoff directory.** "Where should handoff documents be saved? Press enter to accept `<WORKSPACE_ROOT>/_handoffs/`."
 3. **Extra trigger phrases (optional).** "Besides the defaults, do you want any extra phrases to trigger this skill? Leave blank to skip."
 
-Note: which skill loads (`handoff` vs `handoff-zh`) is decided by the phrase that fires the skill, not by any config value. Question 3 only adds **extra** trigger phrases on top of whichever skill is already active — it does not switch language or mix skills.
+Note: there is a single `handoff` skill; the Chinese and English trigger phrases both fire it (the `handoff-zh` twin was retired in v3.0.0). Question 3 only adds **extra** trigger phrases on top of the built-in ones. Output language follows the user's `CLAUDE.md`, not the phrase that triggered the skill.
 
 Do not ask about `TEMPLATE_PATH`, `ACTION_TRACKER`, or `CENTRAL_HANDOFF_INDEX` here. Those are advanced options documented in `user-config.md` — the user can add them later.
 

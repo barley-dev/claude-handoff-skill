@@ -1,13 +1,15 @@
 ---
 name: handoff
-description: Use when the user wants to hand off the current conversation to a new session. Triggers include phrases like "handoff", "wrap up", "session end", "prepare handoff", "start handoff", or similar.
+description: Use when the user wants to hand off the current conversation to a new session. Triggers include "handoff", "wrap up", "session end", "prepare handoff", "start handoff", and the Chinese equivalents "交接", "開始交接", "準備交接", "寫交接", "交接文件", "交接出去", "進行交接", "交接給下一個", "交接給下個對話去做", or similar phrases in any language.
 ---
 
 # Conversation Handoff
 
-> **Version: v2 (2026-05-01)**
+> **Version: v3 (2026-09-03)** — merged the former `handoff` / `handoff-zh` pair into this single skill. The two differed only in prose language; all seven `references/` files were byte-identical (`diff` confirmed). A skill is a set of behavioral instructions for the model, not a user interface, so it needs no translated twin: output language is governed by the user's own `CLAUDE.md`, which is orthogonal to the process defined here.
 
 When the user triggers a handoff, execute the steps below in order. The goal is to let the next Claude session reconstruct the full working context from the handoff document alone — minimal back-and-forth with the user.
+
+**Output language**: write the handoff document and handoff message in the language the user works in (follow their `CLAUDE.md`; default to the conversation's language). This skill's own text is English because it instructs you, not the user. Field labels in the templates below are shown in Chinese where the user's existing files use Chinese — keep whatever the target file already uses rather than switching it.
 
 ## Configuration
 
@@ -184,17 +186,64 @@ The primary reader of a handoff document is the next Claude session. Design for 
   >
   > See [[false-completion-signals]].
 
+- **Before marking any existing todo as "done", pass the completion gate below.** This skill's deliverable clause governs *writing* (an acceptance standard for the future reader). Marking an existing todo as complete is *judging* — a different act with a stricter bar.
+
+### The completion gate (built in — do not rely on the user's CLAUDE.md for this)
+
+This gate is part of the skill because a handoff that misreports finished work is worse than no handoff: the next session skips real work on your word. If the user's own `CLAUDE.md` also defines a completion gate, theirs wins where stricter.
+
+**Hard rule**: before recording anything as "done / landed / shipped / archivable", run `ls` or `grep` to confirm the artifact exists, **and paste the command and its output into the handoff**. A completion claim with no command output is not a judgment — it is a guess, and must not be written down as fact.
+
+**Three signals that are never evidence of completion:**
+
+| Signal | Why it fails |
+|---|---|
+| Chronology | "A later handoff exists in this workspace" proves only that the workspace is still alive |
+| Self-declaration | A `_wiki` page saying "landed", a README version bump, a prior handoff's "complete" — all written *at the time of the claim*, not verified after the fact |
+| Name clues | Filename, directory name, file size, mtime are clues *about* content, not the content itself |
+
+**Existence is not completion.** After locating the artifact, confirm it carries no pending markers: "待確認", "待審", "尚未查證", "未經核准", "TODO", "⬜" (adapt to the user's language).
+
+> **Why this is an execution gate, not a method**: the same error recurred three times in ten days for one user because the rule was written as knowledge — you had to first notice "I am making a completion judgment" to invoke it, and that self-awareness is exactly what goes missing when wrapping up in a hurry. Writing the command and output *into the artifact* makes a violation visible as a gap on the page (a verdict column with no evidence column), so the user can catch it without knowing the methodology.
+
 ## Step 5: Generate and present the handoff message
 
 After writing the handoff document, output the handoff message as a standalone paragraph in the chat. The user copy-pastes this message to start the next session — they should not have to open the handoff file to find it.
 
 ### Output rules
 
-Output the handoff message as plain text — no blockquote prefix (`>`), no code-block fence (triple backticks) — separated from surrounding text with blank lines above and below. This ensures the user's clipboard captures only the message content; in many markdown renderers blockquote and code-block prefixes get copied along with the text and pollute the pasted message.
+**You MUST precede the handoff message with a one-line lead-in that says explicitly what it is and what to do with it.** Put the lead-in on its own line, then a blank line, then the handoff message itself.
+
+The lead-in must convey three things: **this is the handoff message**, **copy it**, **paste it into a new conversation**. Wording may vary; the three information points may not. Examples:
+
+- "Here's the handoff message — copy it and paste it into a new conversation to continue:"
+- "Handoff message below. Copy and paste it into your next session:"
+
+> **Why this is a hard rule** (established 2026-09-03): this skill previously said only "output the handoff message as a standalone paragraph," with no labeling requirement, while simultaneously banning blockquotes and code fences (see below). Together those produce a block of plain text with no visual boundary and no explanation.
+>
+> Daily users recognize it; **first-time users do not**. Reported in practice: a student could not tell what the trailing text was for. The handoff message is this skill's final deliverable — if the reader cannot identify it, the whole flow fails to land.
+>
+> The lead-in sits *outside* the handoff message, so it does not compromise the clean-clipboard rule below — the user still copies only the message body.
+
+Output the handoff message **body** as plain text — no blockquote prefix (`>`), no code-block fence (triple backticks) — separated from surrounding text with blank lines above and below. This ensures the user's clipboard captures only the message content; in a terminal the user selects the text by hand, and blockquote or fence prefix characters get dragged into the selection and pollute the pasted message.
+
+> **This differs from how the same message is stored in the pending file, and the difference is deliberate.** In the file it *is* fenced (Step 5.5, rule 2), because Obsidian renders a copy button on every code block — one click, clean text, no selecting. The terminal has no such button. Same content, two destinations, two mechanics: **unfenced in the chat, fenced in the file.** If a future reader thinks these contradict, they do not — check which destination the rule is about before changing either.
+
+**Trailing boundary — you MUST close the message with an explicit end marker.** The lead-in opens the message; a matching line closes it. Put a blank line after the message body, then a short line on its own saying the handoff message ends there — e.g. `（交接語結束）` or `— end of handoff message —`, in the user's language.
+
+Then, if anything follows, separate it with another blank line. Placing the handoff message as the last block of the reply is still preferable, but the end marker is required either way.
+
+> **Why both ends are marked** (established 2026-09-04): the opening lead-in was added on 2026-09-03 because first-time readers could not tell what the trailing text was for. That fixed the *start* and left the *end* unmarked, so the reader still had to guess where to stop copying. The user hit exactly this: he could not tell whether to stop at `建議模型` or before `目前進度` — and he is the person who designed the format. **The answer is that the message runs through `建議模型`**, its last template line; anyone who has to infer that will sometimes infer it wrong, truncating the state the next session needs.
+>
+> This only affects the *chat* rendering. In the pending file the message sits inside a code fence, which supplies both boundaries and a copy button. A terminal cannot use a fence (the backticks get dragged into a hand-selection), so the boundary must be stated in words instead.
+>
+> The end marker sits **outside** the message body, so the clean-clipboard rule is unaffected.
 
 ### Handoff message templates
 
 (The code blocks below are for template demonstration only. When outputting the actual handoff message to the chat, remove the code block wrapper and deliver as plain-text paragraph.)
+
+**The message body ends at the `Suggested model` line** (or at `Exit condition` when that field is omitted). Everything through that line is part of what the user copies; the end marker goes on the next line, outside the body.
 
 **Desktop / local (handoff file already on the user's machine):**
 
@@ -271,76 +320,105 @@ Decision basis: the user's global CLAUDE.md "model selection" section, the works
 
 After printing the handoff message to the conversation, append it — **in the same turn** — to the central handoff-message file. The user should never have to paste it manually.
 
-**Target file**: `~/資料/_harness/交接語/OPEN.md`
+**Target file**: the value of `PENDING_FILE` from the user's config (see [`references/user-config.md`](references/user-config.md)). Default when undeclared: `<WORKSPACE_ROOT>/_harness/handoffs/pending.md`.
 
-> This path is fixed and does not follow the workspace. `~/資料` maps to each machine's iCloud path via `$CLAUDE_DATA_ROOT`; always write it as `~/資料/`, never hard-code a machine-specific absolute path.
-> If the file does not exist (new machine, or the user has not set it up), run `mkdir -p ~/資料/_harness/交接語/已啟動`, create the OPEN.md skeleton, then append.
+> This path is deliberately **not** workspace-relative at read time — it is one central queue shared by every workspace, so a user working across several projects still has a single place to look. Resolve it once from config; never hard-code a machine-specific absolute path (a path containing `/Users/<name>/` is always wrong here — write `~`-relative instead, since the same vault syncs across machines).
+> If the file does not exist (first run, new machine, or never set up), run `mkdir -p "$(dirname "$PENDING_FILE")"/archive`, create the skeleton via [`references/pending-file-setup.md`](references/pending-file-setup.md), then append.
 
 **Entry format** (append at end of file):
 
-```markdown
-## [YYYY-MM-DD HH:MM] <project name>
+If `<PENDING_DIR>/_format.md` exists, **read it and follow it** — it is the authoritative entry format for that user's file, and it may have been revised since this skill was written. The template below is the fallback when no `_format.md` is present.
+
+````markdown
+## <project name — no date prefix>
 
 | | |
 |---|---|
+| 建立 | YYYY-MM-DD HH:MM |
 | 狀態 | 待啟動 |
 | 工作區 | `~/...` |
 | 交接文件 | `~/.../Handoff_YYYY-MM-DD_slug.md` |
 | 結束狀態 | 完成／中斷／分支 — <exit_condition> |
+| 完成長什麼樣 | <observable deliverable — see Step 4> |
 
 ### 交接語
 
+```
 <full handoff message, plain text, verbatim identical to what Step 5 printed>
-
----
 ```
 
-> Keep the table labels and the `### 交接語` heading in Chinese even in this English variant — the user reads one shared file, and mixed headings would break scanning.
+---
+````
 
-**Rules**:
+**Two format rules that changed on 2026-09-03 — do not revert them:**
 
-- Use the real timestamp from Step 0; never estimate
-- **The 狀態 field is not always `待啟動`.** Three values:
-  - `待啟動` — ready to start now
-  - `待啟動` plus a separate `| 期限 | <date> |` row — when time-critical, the deadline gets **its own row**, never the status field
-  - `⏸ 前置條件未成熟——現在不要做` — add a `| 前置 | <condition> |` row saying what it waits on
-  Mixing these makes the user assume everything is actionable now (found in live use, 2026-08-27)
-- **Deadlines carry a date only — never a countdown, never a symbol** (user's ruling, 2026-08-29: "keep the deadline, drop the countdown")
-  - ✅ `| 期限 | 9/07 送件 |`
-  - ❌ `| 狀態 | 🔴 待啟動 ⏰ 9/07 deadline, 10 days left |`
-  > **Why**: "10 days left" is a static value computed at write time — read it tomorrow and it is simply wrong. **A hard-coded date never rots; a hard-coded countdown always does.** Symbols (⏰🔴) turn a resident document into an alarm, violating rule 1 of the cognitive-load discipline in `~/.claude/CLAUDE.md` ("deadlines are placed, not pushed"): OPEN.md is a clock the user consults, not an alarm that interrupts him.
-  >
-  > **Known gap (not caused by this rule)**: the user has time blindness — seeing "9/07" does not convert itself into "how long do I have." The real fix is a small tool that computes the countdown live from the 期限 field, **not yet built**. Until then, give less rather than give it wrong.
-- When entries interlock (A landing satisfies B's precondition), add a `| 連動 | <note> |` row cross-referencing them
-- **Never record line counts or file sizes in the fields.** They go stale as files change and the user never reads them when copying a message (observed 2026-08-27: an entry went from 354 to 365 lines). The path is the stable identifier
-  > The same test applies inside handoff documents citing other files: **ask whether the line count is load-bearing for this judgement** — omit it when it merely describes size, keep it when it carries the argument (e.g. "at 354 lines this needs splitting")
+1. **The title carries no date prefix.** The timestamp goes in a `| 建立 |` row. Reason: the old `## [YYYY-MM-DD HH:MM] title` form spent 18 characters on information that contributes nothing to deciding what to work on, and it crowded out the title text that dependency-matching relies on.
+2. **The handoff message is wrapped in a bare code fence** (no language tag). This **reverses** the earlier prohibition on code blocks in this file. The old reason — "many markdown renderers copy the fence prefix characters along with the text, polluting the pasted message" — assumed the user selects text by hand and hits Cmd+C. This user copies via the renderer's own copy button (Obsidian shows one at the top-right of every code block), which yields clean plain text. Use **no** language tag: handoff messages contain `~/` paths and shell commands, and a language tag makes the syntax highlighter recolor them.
+   > The lead-in and the "don't use blockquote/code block" rule in **Step 5** still govern the *chat* output, where there is no copy button. Fenced in the file, unfenced in the chat.
+
+**Field semantics** — when `_format.md` exists it is authoritative and the following is only a summary of it. Do not restate its field rules here; edit `_format.md` instead, so there is one place to change. The essentials, for the no-`_format.md` case:
+
+- Use the real timestamp from Step 0 for `| 建立 |`; never estimate
+- **`狀態` is not always "ready".** Distinguish *ready now* from *blocked*, and when blocked add a row naming the blocker. Mixing them makes the user assume everything is actionable now (found in live use, 2026-08-27)
+- **A deadline gets its own row, carries a date only — never a countdown, never an alarm symbol.** "10 days left" is computed at write time and is wrong tomorrow: **a hard-coded date never rots; a hard-coded countdown always does.** Symbols turn a resident document into an alarm; this file is a clock the user consults, not an alarm that interrupts them (if the user's `CLAUDE.md` defines a cognitive-load discipline, follow theirs)
+  > **Known gap, not caused by this rule**: a user with time blindness does not automatically convert "9/07" into "how long do I have." The real fix is computing the countdown live at read time, **not yet built**. Until then, give less rather than give it wrong.
+- **Never record line counts or file sizes.** They go stale and the user does not read them when copying a message (observed 2026-08-27: an entry went 354 → 365 lines). The path is the stable identifier
+  > The same test applies inside handoff documents citing other files: **is the line count load-bearing for the judgement?** Omit it when it merely describes size; keep it when it carries the argument ("at 354 lines this needs splitting")
+
+**Write rules** (these belong to the skill, not to the format):
+
 - The message must be **verbatim identical** to what Step 5 printed — copying from the file and copying from the conversation must yield the same text
-- **Append, never overwrite.** OPEN.md is an accumulating file and must never be rewritten wholesale
+- **Append, never overwrite.** The pending file is an accumulating file and must never be rewritten wholesale
 - If one handoff produces several documents (interleaved projects), append **one entry per document**
-- After appending, state the path in one line, e.g. `交接語已寫入 ~/資料/_harness/交接語/OPEN.md`. Do not dump the file contents
+- After appending, state the resolved path in one line (e.g. `交接語已寫入 ~/資料/_harness/handoffs/pending.md`). Do not dump the file contents
 - If the write fails (missing path that cannot be created, permission error), **say so explicitly** and tell the user to save the message manually — never fail silently
 
 ### Retirement check (after appending, same turn)
 
 **Only check existing entries for the same workspace.** Do not scan the whole file or do a general tidy-up.
 
-1. After appending, `grep` OPEN.md for other entries whose `| 工作區 |` matches this one
+1. After appending, `grep` the pending file for other entries whose `| 工作區 |` matches this one
 2. For each, ask one question: **does this handoff supersede it?** (later progress on the same work line → yes; same workspace but a different task → no)
-3. For those superseded, cut the whole entry to `~/資料/_harness/交接語/已啟動/YYYY-MM.md` (create the month file if absent) and prefix it with `## 退場理由：<one line>`
-4. If unsure, **leave it alone** and ask the user in one line: "OPEN.md still has an entry <title> — does this handoff supersede it?"
+3. For those superseded, cut the whole entry to `<PENDING_DIR>/archive/YYYY-MM.md` (same directory as `PENDING_FILE`; create the month file if absent) and prefix it with `## 離開原因：superseded — <one line>`
+4. If unsure, **leave it alone** and ask the user in one line: "The pending file still has an entry <title> — does this handoff supersede it?"
 
 **Retire only what this handoff supersedes.** Other stale entries (things the user finished themselves, external events that vanished) are out of scope — that remains a dedicated session's job.
 
-> **Why this was added** (2026-08-29): this section previously said "do not judge whether older entries have gone stale," and the result was a file with an intake but no outlet — `已啟動/` was **completely empty** since its creation on 8/27, with all 13 entries piled in OPEN.md, 4 of them long superseded yet still marked "待啟動". The user's words: "there doesn't seem to be any automatic update mechanism when writing a handoff… if work stops halfway before a formal handoff, OPEN.md doesn't update itself, which gets awkward."
+> **Why this was added** (2026-08-29): this section previously said "do not judge whether older entries have gone stale," and the result was a file with an intake but no outlet — `archive/` was **completely empty** since its creation on 8/27, with all 13 entries piled in the pending file, 4 of them long superseded yet still marked "待啟動". The user's words: "there doesn't seem to be any automatic update mechanism when writing a handoff… if work stops halfway before a formal handoff, the pending file doesn't update itself, which gets awkward."
 >
 > The moment of writing is the **only** time it is knowable which entry this one supersedes — the superseded entry's context is still in the conversation. Miss it and only an after-the-fact sweep can recover it. The old rule deferred that judgment to "a dedicated session," and that session did not happen for two days.
 
 **Still do not**:
 
-- Deduplicate or re-sort OPEN.md as a whole
-- Delete any entry (retiring means **cutting to** `已啟動/`, not deleting)
+- Deduplicate or re-sort the pending file as a whole
+- Delete any entry (retiring means **cutting to** `archive/`, not deleting)
 - Judge staleness of entries this handoff does not supersede
 - Mirror the message anywhere else (`_monitoring/_handoffs/INDEX.md` indexes handoff **documents**, not messages)
+
+## Step 5.6: Rebuild the pending-file index (mandatory, immediately after Step 5.5)
+
+Once the append and the retirement check are both done, rebuild the index **in the same turn**:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/tools/pending_index.py"
+```
+
+The tool scans every entry in the pending file and rewrites a clickable index between the `<!-- INDEX:BEGIN -->` / `<!-- INDEX:END -->` markers at the top of the file (Obsidian wikilinks — clicking a title jumps straight to that entry), split into "待啟動" and "前置條件未成熟" groups, with deadlines surfaced.
+
+**Rules**:
+
+- **Order matters** — run it only after both the append and the retirement cut, or the index will miss the new entry or retain a retired one
+- The tool is **idempotent**: re-running replaces only the index block, never appends or touches anything else. Safe to re-run at any point
+- The index block is tool-maintained. **Neither humans nor AI may hand-edit it** — manual changes are overwritten on the next run
+- Paste the tool's output line (e.g. `索引已更新：...（32 則）`) into your reply as completion evidence (per the completion gate in Step 4)
+- **Reconcile the entry count against what you actually did — not against "+1".** Step 5.5 can both append and retire in the same turn, so compute the expected count as `before + appended − retired`. Appending one while retiring one nets **zero change**, and that is correct, not a fault. Only stop and investigate when the count disagrees with that arithmetic.
+  > Established 2026-09-04, from a live acceptance test: an append-plus-retirement turn left the count at 33→33 with a perfectly correct index (0 broken links, 0 missing). A naive "+1" expectation flags that healthy case as a failure — and, worse, would mask the real fault it was meant to catch.
+  - The tool identifies an entry by its `### 交接語` block, not by the title format, so a title that deviates is still counted; a section with no `### 交接語` block is silently skipped. If the count is short, look for a missing or misspelled `### 交接語` heading first
+- If the tool is missing or fails, **say so explicitly** and warn that the index is stale — never fail silently
+
+> **Why a tool rather than having the model write the index** (established 2026-09-03): the index must correspond entry-by-entry, and hand-writing it at 31 entries reliably introduces errors while burning tokens on every handoff. A tool can be verified with `--check`; a hand-written index cannot be verified at all.
+>
+> Building it immediately surfaced an edge case a model would gloss over: `[2026-06 → 提列 2026-08-31]` carries only year-month, so a hardcoded `YYYY-MM-DD` regex silently skipped it — 31 entries indexed as 30. That is precisely the value of verifying with `grep` instead of eyeballing.
 
 ## Notes
 

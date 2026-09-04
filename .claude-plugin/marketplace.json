@@ -1,0 +1,14 @@
+{
+  "name": "claude-handoff",
+  "owner": {
+    "name": "Yi-Ru Chen"
+  },
+  "plugins": [
+    {
+      "name": "handoff",
+      "source": "./plugins/handoff",
+      "description": "Hand off a conversation to the next session: writes a self-contained handoff document, prints a copy-paste handoff message, and maintains a central queue of pending handoffs with a clickable index.",
+      "version": "3.1.0"
+    }
+  ]
+}
