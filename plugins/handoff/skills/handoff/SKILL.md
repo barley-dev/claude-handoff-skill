@@ -63,6 +63,8 @@ Check whether the user has configured this skill by grepping their `CLAUDE.md` f
 
 The skill never edits `CLAUDE.md` directly. It produces a snippet and asks the user to paste it themselves.
 
+At first run only, also mention session identifiers in passing — see [`references/session-identifier.md`](references/session-identifier.md). This is unrelated to `WORKSPACE_ROOT` and never blocks or gates the handoff; it is a one-time, skippable suggestion, not a setup question.
+
 ## Step 1: Detect environment and save location
 
 Do NOT ask the user what environment they are in. Detect it by checking which tools are available:

@@ -67,6 +67,8 @@ An entry leaves the queue with a **reason**, never just "started": `completed`, 
 
 If `PENDING_FILE` doesn't exist, the skill asks before creating anything (`skills/handoff/references/pending-file-setup.md`). Already have your own queue layout? Point `PENDING_FILE` at it and the setup step is skipped — the structure is a default, not a requirement.
 
+At first run, the skill also mentions — once, in passing, never blocking — that a visible session label in your status line makes cross-session messaging (`ListAgents`/`SendMessage`) much easier to route, since a terminal tab or a two-character harness name doesn't say what a session is doing. This is unrelated to the handoff flow itself and has no bundled implementation (status lines are too personal to standardize); see `skills/handoff/references/session-identifier.md` for the general shape if you want to build one.
+
 ## Built-in completion gate
 
 Before recording anything as done, the skill runs `ls`/`grep` to confirm the artifact exists and pastes the command output into the handoff. Chronology, self-declarations, and filenames are not evidence. This lives in the skill rather than in a user's `CLAUDE.md` because a handoff that misreports finished work causes the next session to skip real work.
