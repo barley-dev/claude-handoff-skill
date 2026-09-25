@@ -50,7 +50,7 @@ What "high information density" looks like in practice: multiple file edits, den
 
 **Don't use "context is full" as the signal.** With long context windows, raw token count is no longer a reliable cue. Use turn count, information density, and topic coherence instead.
 
-> **Observation note (Opus 4.7).** Opus 4.7 triggers tools less proactively than 4.6 (per Anthropic's Best Practices). Whether this affects proactive *suggestion* of handoffs (which is text output, not a tool call) is being evaluated. If you find the model never suggests a handoff in long sessions, or suggests too eagerly, mention it so this step can be tuned.
+> If the model never suggests a handoff in long sessions, or suggests one too eagerly, report it so this step can be tuned.
 
 ## Step 0.7: First-run setup check
 
