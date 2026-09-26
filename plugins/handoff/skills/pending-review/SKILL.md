@@ -49,7 +49,7 @@ Then report, in this order:
 1. **Deadline-bound**, sorted by date — these have externally imposed order
 2. **Chains** — "finishing A unblocks B (and C)". State the unlock count; it is the strongest argument for what to do first
 3. **Blocked** — each with `等：<what it waits on>`, so the user can see at a glance what is *not* actionable
-4. **Independent singletons** — grouped by topic, smallest groups last
+4. **Independent singletons** — grouped by `| 下一步 |` (`AI` first: what can start without the user), topic as a secondary tag
 
 > **Why this ordering**: the user's stated pain is "I can't see how they relate or what order to do them in" — not "there are too many". Hiding entries would make the screen cleaner while leaving that pain untouched. Surface structure instead of shortening the list.
 
@@ -63,6 +63,8 @@ Flag an entry as a retirement candidate when any of these holds:
 | A newer entry covers the same workspace and supersedes it | `superseded` |
 | The user has said the work is off | `dropped` |
 | Untouched for 60+ days, or self-labelled "low priority" / "after <month>" | ask — may be `dropped`, may just be slow |
+
+The index already marks two of these mechanically — `已過` (deadline passed) and `久放` (no deadline, work dated 60+ days ago) — and counts them as "待確認去留" in its header line. Start from those labels, but verify each against the entry itself: the labels are computed from dates, not from whether the work moved. For `久放` entries with no deadline, `<PENDING_DIR>/someday.md` (if present) is a parking place that is not a retirement — propose it alongside the three reasons, and move only on approval.
 
 **Before proposing `completed`, pass the completion gate**: run `ls` or `grep` to confirm the artifact exists, confirm it carries no pending markers ("待確認", "待審", "尚未查證", "TODO", "⬜"), and **paste the command and its output** into your report. A completion claim with no command output is a guess and must not be presented as fact. Filenames, directory names, file sizes and mtimes are clues about content, not content.
 

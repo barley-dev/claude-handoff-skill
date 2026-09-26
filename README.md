@@ -43,7 +43,7 @@ Full variable list: `plugins/handoff/skills/handoff/references/user-config.md`.
 
 ### Optional: topic grouping
 
-The index groups entries by topic. The rules are yours, not the plugin's — put them in `_topics.json` **beside** your pending file:
+Each index line carries a topic tag (the main grouping is the `| 下一步 |` field: `AI`／`老師`／`外部`). The topic rules are yours, not the plugin's — put them in `_topics.json` **beside** your pending file:
 
 ```json
 [

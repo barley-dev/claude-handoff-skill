@@ -342,6 +342,7 @@ If `<PENDING_DIR>/_format.md` exists, **read it and follow it** — it is the au
 | 交接文件 | `~/.../Handoff_YYYY-MM-DD_slug.md` |
 | 結束狀態 | 完成／中斷／分支 — <exit_condition> |
 | 完成長什麼樣 | <observable deliverable — see Step 4> |
+| 下一步 | AI／老師／外部 — <one line: who moves first> |
 
 ### 交接語
 
@@ -362,6 +363,8 @@ If `<PENDING_DIR>/_format.md` exists, **read it and follow it** — it is the au
 
 - Use the real timestamp from Step 0 for `| 建立 |`; never estimate
 - **`狀態` is not always "ready".** Distinguish *ready now* from *blocked*, and when blocked add a row naming the blocker. Mixing them makes the user assume everything is actionable now (found in live use, 2026-08-27)
+- **`下一步` says who has to move first — exactly one of `AI`, `老師`, `外部`, as the first word.** `AI` = the next session can start without asking the user anything; `老師` = the user must decide, answer, or act by hand first; `外部` = waiting on something outside both (a date, another session, a third party). The index groups by this value, listing `AI` first so the user can see what starts without them; the fixed vocabulary lets a script count stale values later. Anything else is indexed as `未填`
+- **When `前置` names another pending entry, write it as `[[#<that entry's exact title>]]`.** The index counts "finishing A unlocks N" by matching that link; free-text nicknames ("the one above") are not matched
 - **A deadline gets its own row, carries a date only — never a countdown, never an alarm symbol.** "10 days left" is computed at write time and is wrong tomorrow: **a hard-coded date never rots; a hard-coded countdown always does.** Symbols turn a resident document into an alarm; this file is a clock the user consults, not an alarm that interrupts them (if the user's `CLAUDE.md` defines a cognitive-load discipline, follow theirs)
   > **Known gap, not caused by this rule**: a user with time blindness does not automatically convert "9/07" into "how long do I have." The real fix is computing the countdown live at read time, **not yet built**. Until then, give less rather than give it wrong.
 - **Never record line counts or file sizes.** They go stale and the user does not read them when copying a message (observed 2026-08-27: an entry went 354 → 365 lines). The path is the stable identifier
@@ -417,7 +420,7 @@ Once the append and the retirement check are both done, rebuild the index **in t
 python3 "${CLAUDE_PLUGIN_ROOT}/tools/pending_index.py"
 ```
 
-The tool scans every entry in the pending file and rewrites a clickable index between the `<!-- INDEX:BEGIN -->` / `<!-- INDEX:END -->` markers at the top of the file (Obsidian wikilinks — clicking a title jumps straight to that entry), split into "待啟動" and "前置條件未成熟" groups, with deadlines surfaced.
+The tool scans every entry in the pending file and rewrites a clickable index between the `<!-- INDEX:BEGIN -->` / `<!-- INDEX:END -->` markers at the top of the file (Obsidian wikilinks — clicking a title jumps straight to that entry), in four parts: deadlines sorted by date (past ones marked `已過`), entries grouped by `下一步` with the topic as a trailing tag, blocked entries with what they wait on, and two collapsed timelines (by date registered, by date of the work). Entries past their deadline, or with no deadline and no activity for 60+ days (`久放`), are counted as "待確認去留" — a placement, not an alert; the user decides when to review. Those labels depend on today's date, so `--check` may report the index stale the next day; re-running fixes it.
 
 **Rules**:
 

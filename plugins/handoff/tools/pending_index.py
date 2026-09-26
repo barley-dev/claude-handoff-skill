@@ -22,6 +22,7 @@ pending_index.py — 為交接語擱置檔 pending.md 產生／重建可跳轉�
 """
 
 import argparse
+import datetime as dt
 import json
 import os
 import re
@@ -184,6 +185,80 @@ def mask_fences(text):
     return FENCE_RE.sub(blank, text)
 
 
+DATE_RE = re.compile(r"(\d{4})-(\d{2})(?:-(\d{2}))?")
+DEADLINE_RE = re.compile(r"(?:(\d{4})[-/])?(\d{1,2})[/-](\d{1,2})")
+
+# 「下一步」欄的三個值，順序即索引分組順序。值固定，方便日後用程式計數
+# （2026-09-26 立案，老師的困難多在起頭：先列出不必老師動手就能開始的）。
+NEXT_GROUPS = (
+    ("AI", "AI 可直接推進"),
+    ("老師", "老師決定或親手做"),
+    ("外部", "等外部條件"),
+)
+NEXT_UNSET = "未填"
+
+# 事情日期超過這個天數、又沒有期限，索引標「久放」，作為去留候選。
+# 60 天與 pending-review skill、someday.md 的判準一致。
+STALE_DAYS = 60
+
+TODAY = dt.date.today()
+
+
+def _to_date(m):
+    """DATE_RE 的 match 轉 date；只有年月（如 `2026-06`）時取該月 1 日，僅供排序。"""
+    return dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3) or 1))
+
+
+def _dates(created):
+    """從 `| 建立 |` 取 (事情日期, 登載日期)，各為 (date, 顯示字串)，取不到為 (None, "")。
+
+    一般條目兩者相同：交接當下寫入。舊條目寫成 `2026-08-26 → 提列 2026-08-31`，
+    前者是工作停下的日期，後者是放進本檔的日期（2026-08-31 一次性搬遷）。
+    老師要能分別依兩者排序，看出「這件事多久沒動」與「何時放上來」（2026-09-26）。
+    """
+    created = created or ""
+    found = list(DATE_RE.finditer(created))
+    if not found:
+        return (None, ""), (None, "")
+    event = (_to_date(found[0]), found[0].group(0))
+    reg = event
+    k = created.find("提列")
+    if k != -1:
+        after = [m for m in found if m.start() > k]
+        if after:
+            reg = (_to_date(after[0]), after[0].group(0))
+    return event, reg
+
+
+def _deadline_date(deadline, ref):
+    """把期限欄第一個日期解析成 date；解析不了回 None。
+
+    期限欄是自由文字（如 `9/14 前（因某事 9/15 到期）`），取第一個日期。
+    沒寫年份時用建立日期的年份；若因此比建立日期早半年以上，視為跨年。
+    2026-09-26 前用字串排序，`10/10` 會排在 `9/07` 之前。
+    """
+    m = DEADLINE_RE.search(deadline or "")
+    if not m:
+        return None
+    year = int(m.group(1)) if m.group(1) else (ref.year if ref else TODAY.year)
+    try:
+        out = dt.date(year, int(m.group(2)), int(m.group(3)))
+    except ValueError:
+        return None
+    if not m.group(1) and ref and out < ref - dt.timedelta(days=180):
+        out = out.replace(year=year + 1)
+    return out
+
+
+def _next(cell):
+    """`| 下一步 |` 欄取第一個詞比對三個固定值；其餘一律算未填。"""
+    v = (cell or "").strip()
+    for key, _label in NEXT_GROUPS:
+        if v.startswith(key):
+            return key
+    return NEXT_UNSET
+
+
 def extract_entries(text, topics=None):
     """回傳 entry dict 清單，依文件出現順序。"""
     entries = []
@@ -206,12 +281,18 @@ def extract_entries(text, topics=None):
         status = _cell(body, "狀態") or ""
         workspace = _cell(body, "工作區") or ""
         prereq = _cell(body, "前置") or ""
+        deadline = _cell(body, "期限")
+        (event, event_s), (reg, reg_s) = _dates(date)
         entries.append({
             "title": title,
             "date": date,
             "doc": _cell(body, "交接文件") or "",
             "status": status,
-            "deadline": _cell(body, "期限"),
+            "deadline": deadline,
+            "deadline_date": _deadline_date(deadline, reg),
+            "event": event, "event_s": event_s,
+            "reg": reg, "reg_s": reg_s,
+            "next": _next(_cell(body, "下一步")),
             "workspace": workspace,
             "prereq": prereq,
             "link": _cell(body, "連動") or "",
@@ -227,22 +308,68 @@ def _cell(body, label):
     return m.group(1).strip() if m else None
 
 
+def _overdue(e):
+    return bool(e["deadline_date"] and e["deadline_date"] < TODAY)
+
+
+def _stale(e):
+    return bool(not e["deadline"] and e["event"]
+                and (TODAY - e["event"]).days > STALE_DAYS)
+
+
+def _unlocks(e, entries):
+    """做完 e 會解鎖哪些則：對方的前置欄含 `[[#e 的標題]]`，或含 e 標題前 24 字。
+
+    2026-09-26 前只比對標題前 24 字，而前置欄多半用簡稱（如「上一則」），
+    實測 49 則裡一條鏈都沒抓到。`_format.md` 改為引用他則時寫 `[[#標題]]`，
+    精確且在 Obsidian 可點；前 24 字比對保留給舊寫法。
+    """
+    key = f"[[#{e['title']}]]"
+    return [o for o in entries
+            if o is not e and o["blocked"]
+            and (key in o["blocked"] or e["title"][:24] in o["blocked"])]
+
+
+def _shorten(reason, limit=58):
+    """截斷阻塞原因，但不切斷 wikilink——切在 `[[` 與 `]]` 之間會讓後面整段變成壞連結。"""
+    reason = reason.replace("**", "").strip()
+    if len(reason) <= limit:
+        return reason
+    cut = reason[:limit]
+    if cut.count("[[") > cut.count("]]"):
+        end = reason.find("]]", limit)
+        cut = reason[:end + 2] if end != -1 else cut[:cut.rfind("[[")]
+    return cut.rstrip() + "…"
+
+
 def build_index(entries):
     """產生索引 markdown 區塊。
 
-    三段結構，依「打開檔案時想知道什麼」排序：
-      1. 現在該做什麼 —— 有期限的、可立刻開工的
-      2. 依主題分組 —— 看出哪些工作是同一條線
+    四段結構，依「打開檔案時想知道什麼」排序：
+      1. 有期限 —— 依日期排序，已過的標出來
+      2. 依下一步 —— AI 可直接推進／老師決定或親手做／等外部條件，主題降為行尾標籤
       3. 卡住的 —— 有明確阻塞，看了不必再判斷一次
+      4. 依時間 —— 可收合的兩份清單：依登載日期、依事情日期
+
+    標籤（期限已過、久放）依執行當天計算，跨日後 --check 可能回報過期，重跑即可。
+    2026-09-26 改版（3.3.0）：原「依主題」分組改為「依下一步」。
     """
     lines = [BEGIN, "", "## 索引", ""]
 
     blocked = [e for e in entries if e["blocked"]]
-    active = [e for e in entries if not e["blocked"]]
-    dated = sorted([e for e in active if e["deadline"]], key=lambda e: e["deadline"])
+    overdue = [e for e in entries if _overdue(e)]
+    stale = [e for e in entries if _stale(e)]
+    review = {e["title"] for e in overdue + stale}
+    counts = {k: sum(1 for e in entries if e["next"] == k) for k, _ in NEXT_GROUPS}
+    unset = sum(1 for e in entries if e["next"] == NEXT_UNSET)
 
-    lines.append(f"共 {len(entries)} 則：可動手 {len(active)}、卡住 {len(blocked)}。點標題跳到該則。")
-    lines.append("")
+    head = f"共 {len(entries)} 則｜下一步：" + "、".join(f"{k} {counts[k]}" for k, _ in NEXT_GROUPS)
+    if unset:
+        head += f"、{NEXT_UNSET} {unset}"
+    head += f"｜卡住 {len(blocked)}"
+    if review:
+        head += f"｜待確認去留 {len(review)} 則（期限已過 {len(overdue)}、久放 {len(stale)}）"
+    lines += [head + "。點標題跳到該則。", ""]
 
     def _doc_link(e):
         """交接文件的 Obsidian 連結。
@@ -269,92 +396,83 @@ def build_index(entries):
         # 只在檔案真的存在時才給連結。實測 2026-09-04：33 則裡有 9 則的
         # `| 交接文件 |` 指向已不存在的路徑（檔案被搬動或更名，欄位沒跟著改）。
         # 若照樣輸出，索引會多出 9 個點了打不開的死連結——那比沒有連結更糟，
-        # 使用者會以為是 Obsidian 壞了。找不到就靜靜省略，並在檔尾統一提示。
+        # 使用者會以為是 Obsidian 壞了。找不到就靜靜省略。
         base = Path(raw.replace("~", str(Path.home()))) if raw.startswith("~") else None
         if base is None or not base.is_file():
             return ""
         return f" · [[{name}|文件]]"
 
-    def _created(e):
-        """建立日期，供索引顯示時間序。
-
-        2026-09-03 把 `[日期時間]` 從標題移進 `| 建立 |` 欄，標題變乾淨，
-        但索引也因此看不出時間先後。老師 2026-09-04 回報仍需要這個資訊——
-        要的是「檢視待辦時掌握時間序上的相關性」，不是要它回到標題。
-        只顯示日期不顯示時分：時分對判斷先後幾乎沒有貢獻，卻佔掉寬度。
-        """
-        d = (e.get("date") or "").strip()
-        return d.split()[0] if d else ""
-
     def link(e):
         return f"[[#{e['title']}]]{_doc_link(e)}"
 
-    # ── 1. 現在該做什麼 ──
+    def tags(e, with_topic=True, with_deadline=True):
+        t = [e["topic"]] if with_topic else []
+        if with_deadline and e["deadline"]:
+            t.append(f"期限 {e['deadline']}" + ("（已過）" if _overdue(e) else ""))
+        if e["blocked"]:
+            t.append("卡住")
+        n = len(_unlocks(e, entries))
+        if n:
+            t.append(f"做完會解鎖 {n} 則")
+        if _stale(e):
+            t.append("久放")
+        if e["reg_s"]:
+            t.append(f"登載 {e['reg_s']}")
+        return "｜".join(t)
+
+    far = dt.date.max
+
+    # ── 1. 有期限 ──
+    dated = sorted([e for e in entries if e["deadline"]],
+                   key=lambda e: e["deadline_date"] or far)
     if dated:
         lines += ["### 有期限", ""]
         for e in dated:
-            unblocks = [o for o in entries if o["blocked"] and e["title"][:24] in o["blocked"]]
-            note = f" — 期限 {e['deadline']}"
-            if unblocks:
-                note += f"；做完會解鎖 {len(unblocks)} 則"
-            if _created(e):
-                note += f"（建立 {_created(e)}）"
-            lines.append(f"- {link(e)}{note}")
+            lines.append(f"- {link(e)} — 期限 {e['deadline']}"
+                         + ("（已過）" if _overdue(e) else "")
+                         + f"｜{tags(e, with_deadline=False)}")
         lines.append("")
 
-    # ── 2. 依主題分組 ──
-    lines += ["### 依主題", ""]
-    by_topic = {}
-    for e in entries:
-        by_topic.setdefault(e["topic"], []).append(e)
-    # 多則的主題優先顯示，「其他」殿後
-    def topic_key(item):
-        name, group = item
-        return (name == "其他", -len(group), name)
-    for name, group in sorted(by_topic.items(), key=topic_key):
-        # 「其他」一律由下方專區印，這裡跳過。
-        # 2026-09-04：原本寫 `len(group) == 1 and name == "其他"`，只擋掉「其他」剛好
-        # 1 則的情況；一旦有 2 則以上，主題迴圈印一次、專區又印一次，該組全部重複。
-        # 實害：43 個索引連結對 33 則條目，10 則重複。--check 與斷鏈檢查都不會發現，
-        # 因為兩者比對的是「重跑是否一致」，不是「輸出是否正確」。
-        if name == "其他":
+    # ── 2. 依下一步 ──
+    # 組內：有期限的依日期在前，其餘新登載的在前
+    pos = {id(e): i for i, e in enumerate(entries)}
+
+    def in_group(e):
+        return (e["deadline_date"] or far, -(e["reg"] or dt.date.min).toordinal(), -pos[id(e)])
+    lines += ["### 依下一步", ""]
+    groups = list(NEXT_GROUPS) + ([(NEXT_UNSET, NEXT_UNSET)] if unset else [])
+    for key, label in groups:
+        group = sorted([e for e in entries if e["next"] == key], key=in_group)
+        if not group:
             continue
-        lines.append(f"**{name}**（{len(group)}）")
-        lines.append("")
+        lines += [f"**{label}**（{len(group)}）", ""]
         for e in group:
-            marks = []
-            if e["deadline"]:
-                marks.append(f"期限 {e['deadline']}")
-            if e["blocked"]:
-                marks.append("卡住")
-            if _created(e):
-                marks.append(f"建立 {_created(e)}")
-            suffix = f" — {'；'.join(marks)}" if marks else ""
-            lines.append(f"- {link(e)}{suffix}")
-        lines.append("")
-
-    others = by_topic.get("其他", [])
-    if others:
-        lines.append(f"**其他**（{len(others)}）")
-        lines.append("")
-        for e in others:
-            marks = (["卡住"] if e["blocked"] else [])
-            if _created(e):
-                marks.append(f"建立 {_created(e)}")
-            suffix = f" — {'；'.join(marks)}" if marks else ""
-            lines.append(f"- {link(e)}{suffix}")
+            lines.append(f"- {link(e)} — {tags(e)}")
         lines.append("")
 
     # ── 3. 卡住的 ──
     if blocked:
         lines += ["### 卡住（有明確阻塞，不必再判斷一次）", ""]
         for e in blocked:
-            reason = e["blocked"]
-            reason = reason.replace("**", "").strip()
-            if len(reason) > 58:
-                reason = reason[:58] + "…"
             lines.append(f"- {link(e)}")
-            lines.append(f"  - 等：{reason}")
+            lines.append(f"  - 等：{_shorten(e['blocked'])}")
+        lines.append("")
+
+    # ── 4. 依時間（Obsidian 可收合 callout，預設收合，不拉長索引） ──
+    lines += ["### 依時間", ""]
+    for label, key, other, other_label in (
+            ("依登載日期", "reg", "event_s", "事情"),
+            ("依事情日期", "event", "reg_s", "登載")):
+        # 同日以檔內位置決勝：新條目附加在檔尾，越後面越新
+        ordered = [e for _, e in sorted(enumerate(entries),
+                                        key=lambda p: (p[1][key] or dt.date.min, p[0]),
+                                        reverse=True)]
+        lines.append(f"> [!note]- {label}（新→舊，{len(ordered)} 則）")
+        for e in ordered:
+            main_s = e["reg_s"] if key == "reg" else e["event_s"]
+            main_label = "登載" if key == "reg" else "事情"
+            extra = f"｜{other_label} {e[other]}" if e[other] and e[other] != main_s else ""
+            lines.append(f"> - [[#{e['title']}]] — {main_label} {main_s or '未記'}{extra}｜{e['topic']}")
         lines.append("")
 
     lines.append(END)
@@ -442,17 +560,24 @@ def audit(text, entries):
 
     這裡斷言的是關係，不製造任何情境：
       1. 索引收錄的唯一條目數 == 實際條目數（不多不少）
-      2. 每則出現次數不超過索引分段數（跨段重列合法，同段重複不合法）
-      3. code fence 內不得含回索引連結（違反 SKILL.md 的 verbatim 硬規則）
+      2. 同一分段內不得重複
+      3. 全收錄的分段（「依下一步」各組合計、每份時間序清單）必須剛好涵蓋全部條目
+      4. code fence 內不得含回索引連結（違反 SKILL.md 的 verbatim 硬規則）
     """
     import re as _re
     from collections import Counter
 
     problems = []
     body = text.split(BEGIN_PREFIX)[1].split(END)[0] if BEGIN_PREFIX in text else ""
-    linked = [_re.match(r"^- \[\[#([^\]|]+)", ln.strip()).group(1)
-              for ln in body.split("\n")
-              if _re.match(r"^- \[\[#([^\]|]+)", ln.strip())]
+    link_re = _re.compile(r"^- \[\[#([^\]|]+)")
+
+    def norm(ln):
+        # 時間序清單在 callout 內，行首多一個 `> `
+        s = ln.strip()
+        return s[1:].strip() if s.startswith(">") else s
+
+    linked = [link_re.match(norm(ln)).group(1)
+              for ln in body.split("\n") if link_re.match(norm(ln))]
     counts = Counter(linked)
     titles = {e["title"] for e in entries}
 
@@ -467,22 +592,34 @@ def audit(text, entries):
     # 跨段重列（同時有期限又卡住）合法；同段內出現兩次一定是產生邏輯有錯。
     # 2026-09-04：先前寫成寬鬆上限，導致「其他」組整組重複 2 次時仍判通過——
     # 那正是本稽核要抓的那個 bug，寫鬆了就等於沒寫。
-    cur = "（未分段）"
+    cur, parent = "（未分段）", "（未分段）"
     seen_in_section = {}
+    members = {}          # 全收錄分段 → 標題清單
     for ln in body.split("\n"):
-        s = ln.strip()
-        if s.startswith("### ") or (s.startswith("**") and s.endswith("）")):
+        s = norm(ln)
+        if s.startswith("### "):
+            cur = parent = s
+            continue
+        if (s.startswith("**") and s.endswith("）")) or s.startswith("[!"):
             cur = s
             continue
-        m = _re.match(r"^- \[\[#([^\]|]+)", s)
+        m = link_re.match(s)
         if not m:
             continue
         key = (cur, m.group(1))
         seen_in_section[key] = seen_in_section.get(key, 0) + 1
+        if parent == "### 依下一步":
+            members.setdefault(parent, []).append(m.group(1))
+        elif cur.startswith("[!"):
+            members.setdefault(cur, []).append(m.group(1))
     dup = {k: v for k, v in seen_in_section.items() if v > 1}
     if dup:
         problems.append("同一分段內重複列出（{}）：".format(len(dup)) +
                         "、".join(f"{sec} → {title}×{n}" for (sec, title), n in list(dup.items())[:5]))
+    # 舊格式索引沒有這些分段時不檢查（過渡期用新工具稽核舊索引不該誤報）
+    for sec, got in members.items():
+        if len(got) != len(titles) or set(got) != titles:
+            problems.append(f"{sec} 應涵蓋全部 {len(titles)} 則，實際 {len(got)} 則")
 
     for blk in _re.findall(r"\n```+[^\n]*\n(.*?)\n```+[ \t]*\n", text, _re.S):
         if BACKLINK in blk or "[[#索引" in blk:
