@@ -306,7 +306,7 @@ Fill rule (pick one; **omit the line entirely if none applies**):
 - **Task aligns with workspace CLAUDE.md routing**: write "per project rules", e.g. `per ~/path/to/workspace/CLAUDE.md model selection`
 - **No useful routing recommendation**: omit the line, do not write a placeholder like "no recommendation"
 
-Decision basis: the user's global CLAUDE.md "model selection" section, the workspace CLAUDE.md "model selection" section, and the `task-dispatch` skill. The routing rules themselves stay in CLAUDE.md as the single source of truth; this field is only "the result of applying those rules to the current handoff."
+Decision basis: the user's global CLAUDE.md "model selection" section, the workspace CLAUDE.md "model selection" section, and any routing skill the user has configured. The routing rules themselves stay in CLAUDE.md as the single source of truth; this field is only "the result of applying those rules to the current handoff."
 
 ### Principles for the message
 
